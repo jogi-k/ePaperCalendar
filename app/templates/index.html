@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Family Calendar — Preview</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; }
+    .error { color: #b00020; background: #fdecea; padding: .75rem 1rem; border-radius: .5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: .4rem .5rem; border-bottom: 1px solid #eee; vertical-align: top; }
+    .when { white-space: nowrap; color: #555; width: 9rem; }
+    .allday { color: #888; font-size: .85em; }
+    .empty { color: #777; }
+  </style>
+</head>
+<body>
+  <h1>Family Calendar — Preview</h1>
+
+  {% if error %}
+    <p class="error">Could not load events: {{ error }}</p>
+  {% elif events %}
+    <table>
+      {% for event in events %}
+        <tr>
+          <td class="when">{{ event.start_display }}</td>
+          <td>
+            {{ event.summary }}
+            {% if event.all_day %}<span class="allday">(all day)</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty">No upcoming events in the next {{ days_ahead }} days.</p>
+  {% endif %}
+</body>
+</html>

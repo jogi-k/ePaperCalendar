@@ -1,0 +1,10 @@
+# Web app
+flask>=3.0
+python-dotenv>=1.0
+
+# Google Calendar access (service account)
+google-api-python-client>=2.100
+google-auth>=2.30
+
+# ePaper rendering (month calendar -> PNG)
+Pillow>=10.1
