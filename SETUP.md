@@ -70,7 +70,11 @@ venv/bin/python main.py
 
 Or render headless: `venv/bin/python -m app.render --month 2026-10 --out calendar.png`
 
-## Troubleshooting
+## 6. Customize your family
+
+All family-specific rules — the column names, group aliases (LauMi, MaPa), person aliases (Mama, Papa), special prefixes (SSO, TG, CH, Praxis, Turbine) and the birthday rule ("hat Geburtstag" → "GEB …") — live in **`app/family_config.py`**. Edit that one file to adapt the calendar to your own family; no other code needs to change.
+
+## 7. Troubleshooting
 
 | Symptom | Cause |
 |---|---|
