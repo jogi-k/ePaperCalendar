@@ -209,7 +209,7 @@ def draw_strip(img, draw, x0, y0, x1, y1, text, font_size):
     img.paste(tmp, ((x0 + x1) // 2 - tmp.width // 2, (y0 + y1) // 2 - tmp.height // 2))
 
 
-def render_month(events, year, month, width=1872, height=1404, tz=None):
+def render_month(events, year, month, width=1600, height=1200, tz=None):
     """Render one month page and return it as a PNG BytesIO."""
     tz = tz or ZoneInfo("Europe/Zurich")
     img = Image.new("L", (width, height), PAPER)
@@ -367,8 +367,8 @@ def main():
     )
     buf = render_month(
         events, year, month,
-        width=int(os.environ.get("EPAPER_WIDTH", "1872")),
-        height=int(os.environ.get("EPAPER_HEIGHT", "1404")),
+        width=int(os.environ.get("EPAPER_WIDTH", "1600")),
+        height=int(os.environ.get("EPAPER_HEIGHT", "1200")),
         tz=tz,
     )
     with open(args.out, "wb") as f:

@@ -12,6 +12,6 @@ class Config:
     FAMILY_CALENDAR_ID = os.environ.get("FAMILY_CALENDAR_ID", "")
     DAYS_AHEAD = int(os.environ.get("DAYS_AHEAD", "14"))
     PORT = int(os.environ.get("PORT", "5000"))
-    EPAPER_WIDTH = int(os.environ.get("EPAPER_WIDTH", "1872"))
-    EPAPER_HEIGHT = int(os.environ.get("EPAPER_HEIGHT", "1404"))
+    EPAPER_WIDTH = int(os.environ.get("EPAPER_WIDTH", "1600"))
+    EPAPER_HEIGHT = int(os.environ.get("EPAPER_HEIGHT", "1200"))
     TIMEZONE = os.environ.get("TIMEZONE", "Europe/Zurich")
