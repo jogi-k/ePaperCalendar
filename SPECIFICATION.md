@@ -1,119 +1,135 @@
 # ePaper Family Calendar — Specification
 
-Chosen access design: **Path A — Google service account + one shared "Family" calendar**.
+What the program does and how it behaves. For installing and configuring it (Google account, service account, shared calendar), see [SETUP.md](SETUP.md).
 
-Why this path:
+## Overview
 
-- No OAuth consent dance, no test users, no expiring tokens
-- The app runs fully headless — ideal for a local web app feeding an ePaper display
-- One shared calendar is the single source of truth for the whole family
+A small local web app (Python + Flask) that reads one shared Google calendar ("Family") via a service account and renders it as a **one-page-per-month, grayscale image** for an ePaper display (target panel: INKPLATE 13SPECTRA, 13.3″, E-Ink Spectra 6-color; the render size is configurable via `EPAPER_WIDTH`/`EPAPER_HEIGHT` — 1872×1404 in this setup). It also serves a simple HTML preview and a JSON API for debugging.
 
-## 1. Google Cloud project
+## Access design
 
-1. Go to https://console.cloud.google.com and create a project, e.g. `epaper-family-calendar`.
-2. In **APIs & Services → Library**, search for **Google Calendar API** and enable it.
-
-## 2. Service account
-
-1. **IAM & Admin → Service Accounts → Create service account**
-   - Name: `epaper-family-cal`
-   - No extra IAM roles needed — access is granted via calendar sharing, not IAM.
-2. Open the service account → **Keys → Add key → Create new key → JSON**.
-3. A JSON file downloads. Save it in this project as:
-
-   ```
-   credentials/service-account.json
-   ```
-
-4. Add to `.gitignore`:
-
-   ```
-   credentials/
-   .env
-   ```
-
-The service account email looks like:
-
-```
-epaper-family-cal@<project-id>.iam.gserviceaccount.com
-```
-
-## 3. Shared "Family" calendar
-
-1. Go to https://calendar.google.com and create a new calendar named **Family**.
-2. Open its **Settings and sharing**:
-   - **Integrate calendar** → copy the **Calendar ID** (e.g. `abc123...@group.calendar.google.com`)
-   - **Share with specific people** → add the service account email from step 2 with permission **"See all event details"** (read-only)
-3. Store the Calendar ID — the app needs it. Suggested `.env`:
-
-   ```
-   GOOGLE_SERVICE_ACCOUNT_KEY=./credentials/service-account.json
-   FAMILY_CALENDAR_ID=<calendar-id-from-above>
-   ```
-
-Without the sharing step the API returns `404 Not Found`, even though authentication itself succeeds.
-
-## 4. How the app reads events
-
-- Authenticate with the JSON key server-side (Python: `google-api-python-client` + `google-auth`)
-- Call `calendar.events.list` on `FAMILY_CALENDAR_ID` with `timeMin`/`timeMax` covering the rendered month (or the next `DAYS_AHEAD` days for the preview/API)
+- **Service account** (JSON key at `GOOGLE_SERVICE_ACCOUNT_KEY`), read-only scope `calendar.readonly`
+- Reads the single shared calendar `FAMILY_CALENDAR_ID`
+- No OAuth, no user sign-in, tokens never expire
 - Recurring events are expanded into individual instances (`singleEvents=true`)
-- Read-only access is sufficient for the display
-- The Google client uses a 15s timeout: if the API hangs, requests fail fast (the preview shows an error box; `/api/events` and `/calendar.png` return 503) instead of blocking
+- The Google client uses a **15s timeout**: a hung API call fails fast (the preview shows an error box; `/api/events` and `/calendar.png` return `503`) instead of blocking the request
 
-## 5. Family workflow
+## Configuration (`.env`)
 
-Everyone adds events to the shared **Family** calendar. From each family member's own Google Calendar it shows up as a shared/subscribed calendar. Syncing from personal calendars can be added later if needed.
+| Variable | Default | Purpose |
+|---|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | `credentials/service-account.json` | Path to the service account JSON key |
+| `FAMILY_CALENDAR_ID` | — (required) | Calendar ID of the shared family calendar |
+| `EPAPER_WIDTH` / `EPAPER_HEIGHT` | `1600` / `1200` | Render size in px (landscape); set to the panel's native resolution (1872×1404 for the INKPLATE 13SPECTRA in this setup) |
+| `TIMEZONE` | `Europe/Zurich` | Local timezone for day assignment and "today" |
+| `PORT` | `5000` | HTTP port |
+| `DAYS_AHEAD` | `14` | Preview / `/api/events` window in days |
 
-## Not chosen: OAuth2 user flow
+## HTTP API
 
-Skipped on purpose. With the OAuth consent screen in "Testing" mode, refresh tokens expire after 7 days (weekly re-consent), and each consenting user only exposes their own calendar. The service account path avoids both issues.
+| Route | Returns |
+|---|---|
+| `GET /` | HTML preview: table of upcoming events (next `DAYS_AHEAD` days, with times) |
+| `GET /api/events` | JSON array of upcoming events |
+| `GET /calendar.png?month=YYYY-MM` | PNG month page (default: current month), `image/png` |
 
-## 6. Web app stack
+All calendar-backed routes call `calendar.events.list` with `timeMin`/`timeMax` covering the relevant range (the month for the image, `DAYS_AHEAD` for preview/API). On failure, `/api/events` and `/calendar.png` return `503` with a JSON error; the preview page renders the error inline.
 
-**Python + Flask** (chosen over Next.js): the app runs locally — most likely on a Raspberry Pi — where the ePaper ecosystem (Waveshare/Inky display drivers, Pillow image rendering) is Python-first. The official `google-api-python-client` covers the calendar access, and Flask is more than enough for the simple preview page.
+Event JSON fields: `id`, `summary`, `start`, `end` (ISO 8601; all-day events as plain `date`), `all_day`.
 
-## 7. Run the app
+## Rendering pipeline
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env   # fill in FAMILY_CALENDAR_ID
-.venv/bin/python main.py
+1. Fetch events overlapping the month (month bounds in `TIMEZONE`, converted to UTC)
+2. Assign each event to one or more columns (see routing below)
+3. Compute the local day span; clamp to the displayed month
+4. Render the page (Pillow, grayscale, mode `L`)
+
+Also runnable headless: `python -m app.render --month 2026-10 --out calendar.png`
+
+## Month layout (the ePaper page)
+
+One page per month, landscape:
+
+- **Header**: month name, e.g. "Oktober 2026" (German month names)
+- **Rows**: one per day of the month
+- **First column**: date as "Weekday, Day" — German short weekday, e.g. "Mo, 5"
+- **Columns** (left to right): `Familie`, `Laurin`, `Milo`, `Conny`, `Jogi`
+- **No times** are rendered
+- Today's date is highlighted (inverted); weekend rows are shaded
+
+### Event routing
+
+An event belongs to the person or group its title **starts with** — later occurrences of a name do not count. Matching is case-insensitive, on the first word only (word boundary). All family-specific rules live in **`app/family_config.py`**; the generic logic is in `app/routing.py`.
+
+| Title starts with | Column(s) | Displayed title |
+|---|---|---|
+| `<name> hat Geburtstag` | Familie | `GEB <name>` (always Familie, even if `<name>` is a person) |
+| `SSO` | Conny | unchanged |
+| `TG` | Laurin | unchanged |
+| `CH` | Conny | unchanged |
+| `Praxis` | Conny | unchanged |
+| `Turbine` | Jogi | unchanged |
+| `LauMi` | Laurin + Milo | unchanged (group kept) |
+| `MaPa` / `PaMa` | Conny + Jogi | unchanged (group kept) |
+| `Mama` | Conny | leading `Mama` removed |
+| `Papa` | Jogi | leading `Papa` removed |
+| `Laurin` / `Milo` / `Conny` / `Jogi` | that column | leading name removed (e.g. "Milo Filmstart" → "Filmstart") |
+| anything else | Familie | unchanged |
+
+Examples: "Milo Filmstart" → Milo column as "Filmstart"; "Turbine Helferessen (Jogi)" → Jogi column, full title (the later "Jogi" does not count); "50 Jahre … Conny Lektorin" → Familie (Conny is not at the start); "LauMi schulfrei" → both the Laurin and Milo columns, title kept.
+
+A single-day event valid for two **adjacent** persons (a group prefix) is written **once, centered over the two merged cells** (the grid line between them is covered). Exception: if one of the two columns has another entry that day, the event is rendered in each column instead.
+
+### Day spans
+
+- All-day events: Google's end date is exclusive → last day = end − 1 day
+- Timed events: local (`TIMEZONE`) start day to end day; an end at exactly local midnight counts as the previous day
+- Spans are clamped to the displayed month (an event crossing a month boundary appears on both pages, truncated)
+
+### Single-day events
+
+The displayed title (after the routing rewrites above) as text in the day's cell, wrapped to the column width. The font shrinks (down to a 9px floor) so that all entries sharing a cell fit its row height; text is clipped only beyond that. Cell text keeps clear of the multi-day strip boxes covering the same day.
+
+### Multi-day events (2+ days)
+
+A vertical strip at the **right border** of the column, spanning the covered day-rows, with the title **rotated 90°** (reads top to bottom). The box width adapts to the title: an entry that fits on one line gets a **one-line box**; longer titles wrap to **two lines** at the largest workable font — plain word wrap when possible, otherwise one word hyphenated across the lines at a syllable/compound boundary (e.g. "Weihnachtsessen" → "Weihnachts-" / "essen", "TG: Probeweekend" → "TG: Probe-" / "weekend") — and are truncated with "…" only as a last resort. Overlapping strips in one column stack leftwards; cell text on the covered days is narrowed accordingly.
+
+## Project structure
+
+```
+ePaperCalendar/
+├── main.py                  # entry point (Flask app)
+├── requirements.txt
+├── .env.example
+├── app/
+│   ├── __init__.py          # app factory
+│   ├── config.py            # env-based configuration
+│   ├── family_config.py     # family-specific rules (columns, aliases, prefixes)
+│   ├── routing.py           # generic title -> column routing logic
+│   ├── calendar_service.py  # Google Calendar access (service account)
+│   ├── render.py            # month-page rendering (Pillow) + CLI
+│   ├── routes.py            # /, /api/events, /calendar.png
+│   └── templates/index.html # preview page
+├── credentials/             # service account key (gitignored)
+├── SPECIFICATION.md         # this document
+└── SETUP.md                 # human setup guide
 ```
 
-- Preview page: http://localhost:5000/ (HTML table of upcoming events)
-- JSON API: http://localhost:5000/api/events
-- Month image (ePaper): http://localhost:5000/calendar.png?month=YYYY-MM
+## Customization
 
-Status: verified working — `/api/events` returns the live events from the shared family calendar.
+All family-specific rules — column names, group aliases (LauMi, MaPa/PaMa), person aliases (Mama, Papa), special prefixes (SSO, TG, CH, Praxis, Turbine) and the birthday rule — live in **`app/family_config.py`**. Edit that one file to adapt the calendar to another family; the routing logic (`app/routing.py`) and the rendering (`app/render.py`) stay generic.
 
-## 8. ePaper month layout
+## Known limitations
 
-One page per month (`app/render.py`, Pillow, grayscale), served at `/calendar.png?month=YYYY-MM` (default: current month) or rendered via CLI:
+- Cell text shrinks to fit its row (9px floor); extremely long titles in busy cells can still clip
+- Very long single-word titles in short multi-day strips are hyphenated across two lines; only if even that does not fit are they truncated with "…"
+- Grayscale only (no color accents for persons or events), although the target panel supports 6 colors (black, white, yellow, red, blue, green)
+- German month/weekday names are hardcoded
 
-```bash
-.venv/bin/python -m app.render --month 2026-10 --out calendar.png
-```
+## Status
 
-- Header: month name (e.g. "Oktober 2026")
-- Rows: one per day; first column shows the date as "Weekday, Day" (German short weekday, e.g. "Mo, 5")
-- Columns: Familie, Laurin, Milo, Conny, Jogi
-- Routing: no name in the title -> Familie, otherwise the matching column(s).
-  Aliases: Mama -> Conny, Papa -> Jogi, MaPa/PaMa -> Conny + Jogi, LauMi -> Laurin + Milo
-- No times; single-day events as text in the day's cell
-- Multi-day events: vertical strip at the right border of the column spanning the covered
-  days (clamped to the shown month), title rotated 90°; overlapping strips in one column
-  stack leftwards; strip titles are shrunk to fit the covered days and truncated with "…" if needed
-- Single-day cell text: wrapped to the column width; at 1872x1404 each cell fits one
-  line, longer titles are clipped at the cell edge
-- Today's date is highlighted; weekend rows are shaded
-- Default render size 1872x1404 (landscape, grayscale); set EPAPER_WIDTH / EPAPER_HEIGHT /
-  TIMEZONE in `.env` to match your panel
-
-## Next steps
-
-- [x] Scaffold the web app (Python/Flask — `main.py`, `app/`, `requirements.txt`)
-- [x] Implement an `/api/events` endpoint that reads the calendar via the service account
-- [x] Build the ePaper rendering view (Pillow → PNG: `app/render.py`, `/calendar.png`)
-- [ ] Refresh the ePaper display from the app on a schedule
+- [x] Google Calendar access via service account
+- [x] Web app with preview, JSON API, month image
+- [x] Month layout with routing and multi-day strips
+- [ ] Push the image to an ePaper display (needs the panel's driver)
+- [ ] Scheduled refresh of the display
